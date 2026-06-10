@@ -738,19 +738,87 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Capture the original state of all files in this transaction in case we need to roll back
+    let mut backups = std::collections::HashMap::new();
+    for file_path in file_updates.keys() {
+        if file_path.exists() {
+            if let Ok(orig) = fs::read_to_string(file_path) {
+                backups.insert(file_path.clone(), Some(orig));
+            }
+        } else {
+            backups.insert(file_path.clone(), None);
+        }
+    }
+
     // Write all verified modifications to disk transactionally
-    for (file_path, new_text) in file_updates {
+    for (file_path, new_text) in &file_updates {
         if let Some(parent) = file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
                 eprintln!("FATAL ERROR: Failed to create directories for path {:?}: {}", file_path, e);
                 std::process::exit(1);
             }
         }
-        if let Err(e) = fs::write(&file_path, new_text) {
+        if let Err(e) = fs::write(file_path, new_text) {
             eprintln!("FATAL ERROR: Failed to write file {:?}: {}", file_path, e);
             std::process::exit(1);
         }
         println!("✅ {:?} updated successfully.", file_path);
+    }
+
+    // Run compile checking if configured or auto-detected
+    let mut check_command = args.compile_check.clone();
+    if check_command.is_none() {
+        if args.cwd.join("Cargo.toml").exists() {
+            check_command = Some("cargo check".to_string());
+        } else if args.cwd.join("tsconfig.json").exists() {
+            check_command = Some("npx tsc --noEmit".to_string());
+        } else if args.cwd.join("package.json").exists() {
+            check_command = Some("npm run build".to_string());
+        }
+    }
+
+    if let Some(cmd_str) = check_command {
+        println!("⚙️ Running compilation check: \"{}\"...", cmd_str);
+
+        #[cfg(target_os = "windows")]
+        let mut cmd = Command::new("cmd");
+        #[cfg(target_os = "windows")]
+        cmd.arg("/C");
+
+        #[cfg(not(target_os = "windows"))]
+        let mut cmd = Command::new("sh");
+        #[cfg(not(target_os = "windows"))]
+        cmd.arg("-c");
+
+        let status = cmd.arg(&cmd_str)
+            .current_dir(&args.cwd)
+            .status();
+
+        let compile_success = match status {
+            Ok(s) => s.success(),
+            Err(e) => {
+                eprintln!("WARNING: Failed to run compilation check command: {}", e);
+                false
+            }
+        };
+
+        if !compile_success {
+            eprintln!("🛑 Compilation check failed! Rolling back changes...");
+            for (file_path, backup) in backups {
+                match backup {
+                    Some(orig) => {
+                        let _ = fs::write(&file_path, orig);
+                    }
+                    None => {
+                        let _ = fs::remove_file(&file_path);
+                    }
+                }
+            }
+            eprintln!("🛑 Transaction aborted. All modifications rolled back safely.");
+            std::process::exit(1);
+        } else {
+            println!("✨ Compilation check passed successfully.");
+        }
     }
 
     println!("\nDone. All operations completed successfully.");
@@ -1050,4 +1118,3 @@ new_func_2();
         assert_eq!(result, None);
     }
 }
-
