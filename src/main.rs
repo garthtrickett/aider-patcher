@@ -1,5 +1,4 @@
 // File: src/main.rs
-// [Self-Patch Verification: Patcher is operational]
 // ==============================================================================
 use clap::Parser as ClapParser;
 use serde::Deserialize;
@@ -7,6 +6,7 @@ use similar::TextDiff;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
 use tree_sitter::{Node, Parser as TsParser};
 
 #[derive(ClapParser, Debug)]
@@ -19,6 +19,10 @@ struct Args {
     /// Target working directory of the project workspace
     #[arg(short, long, default_value = ".")]
     cwd: PathBuf,
+
+    /// Optional command to run for full compilation/type-checking verification (e.g. "cargo check" or "npm run build")
+    #[arg(short, long)]
+    compile_check: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -1046,3 +1050,4 @@ new_func_2();
         assert_eq!(result, None);
     }
 }
+
