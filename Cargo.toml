@@ -1,0 +1,17 @@
+# File: Cargo.toml
+# ==============================================================================
+[package]
+name = "aider-patcher"
+version = "0.1.0"
+edition = "2021"
+authors = ["Grug Brain <grug@daemon.local>"]
+description = "High-fidelity, multi-tier search-and-replace Aider patch engine in Rust."
+
+[dependencies]
+clap = { version = "4.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+similar = "2.0"
+tree-sitter = "0.23.2" # matching your current tree-sitter version
+tree-sitter-typescript = "0.23.2"
+tree-sitter-rust = "0.23.2" # or current 2026 version
