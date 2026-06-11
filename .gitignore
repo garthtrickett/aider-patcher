@@ -1,6 +1,7 @@
 # --- Rust/Cargo Artifacts ---
 /target/
 **/*.rs.bk
+a.txt
 
 # --- Patcher Temporary State Files ---
 # Temporary copy of payload processed by the bridge

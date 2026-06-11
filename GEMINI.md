@@ -1,4 +1,8 @@
 
+
+nix flake update aider-patcher
+rebuild
+
 # GEMINI.md: Code Patching & Diff Guidelines
 
 ## CRITICAL: JSON DIFF FORMATTING RULES
