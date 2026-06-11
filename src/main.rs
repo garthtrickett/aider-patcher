@@ -783,49 +783,49 @@ fn main() {
         }
     }
 
-    if let Some(cmd_str) = check_command {
-        println!("⚙️ Running compilation check: \"{}\"...", cmd_str);
+    // if let Some(cmd_str) = check_command {
+    //     println!("⚙️ Running compilation check: \"{}\"...", cmd_str);
 
-        #[cfg(target_os = "windows")]
-        let mut cmd = Command::new("cmd");
-        #[cfg(target_os = "windows")]
-        cmd.arg("/C");
+    //     #[cfg(target_os = "windows")]
+    //     let mut cmd = Command::new("cmd");
+    //     #[cfg(target_os = "windows")]
+    //     cmd.arg("/C");
 
-        #[cfg(not(target_os = "windows"))]
-        let mut cmd = Command::new("sh");
-        #[cfg(not(target_os = "windows"))]
-        cmd.arg("-c");
+    //     #[cfg(not(target_os = "windows"))]
+    //     let mut cmd = Command::new("sh");
+    //     #[cfg(not(target_os = "windows"))]
+    //     cmd.arg("-c");
 
-        let status = cmd.arg(&cmd_str).current_dir(&args.cwd).status();
+    //     let status = cmd.arg(&cmd_str).current_dir(&args.cwd).status();
 
-        let compile_success = match status {
-            Ok(s) => s.success(),
-            Err(e) => {
-                eprintln!("WARNING: Failed to run compilation check command: {}", e);
-                false
-            }
-        };
+    //     let compile_success = match status {
+    //         Ok(s) => s.success(),
+    //         Err(e) => {
+    //             eprintln!("WARNING: Failed to run compilation check command: {}", e);
+    //             false
+    //         }
+    //     };
 
-        if !compile_success {
-            eprintln!("🛑 Compilation check failed! Rolling back changes...");
-            for (file_path, backup) in backups {
-                match backup {
-                    Some(orig) => {
-                        let _ = fs::write(&file_path, orig);
-                    }
-                    None => {
-                        let _ = fs::remove_file(&file_path);
-                    }
-                }
-            }
-            eprintln!("🛑 Transaction aborted. All modifications rolled back safely.");
-            std::process::exit(1);
-        } else {
-            println!("✨ Compilation check passed successfully.");
-        }
-    }
+    //     if !compile_success {
+    //         eprintln!("🛑 Compilation check failed! Rolling back changes...");
+    //         for (file_path, backup) in backups {
+    //             match backup {
+    //                 Some(orig) => {
+    //                     let _ = fs::write(&file_path, orig);
+    //                 }
+    //                 None => {
+    //                     let _ = fs::remove_file(&file_path);
+    //                 }
+    //             }
+    //         }
+    //         eprintln!("🛑 Transaction aborted. All modifications rolled back safely.");
+    //         std::process::exit(1);
+    //     } else {
+    //         println!("✨ Compilation check passed successfully.");
+    //     }
+    // }
 
-    println!("\nDone. All operations completed successfully.");
+    // println!("\nDone. All operations completed successfully.");
 }
 
 // ==============================================================================
