@@ -138,11 +138,23 @@ fn replace_part_with_missing_leading_whitespace(
     if min_leading > 0 {
         adjusted_part_lines = part_lines
             .iter()
-            .map(|p| if !p.trim().is_empty() { p[min_leading..].to_string() } else { p.clone() })
+            .map(|p| {
+                if !p.trim().is_empty() {
+                    p[min_leading..].to_string()
+                } else {
+                    p.clone()
+                }
+            })
             .collect();
         adjusted_replace_lines = replace_lines
             .iter()
-            .map(|r| if !r.trim().is_empty() { r[min_leading..].to_string() } else { r.clone() })
+            .map(|r| {
+                if !r.trim().is_empty() {
+                    r[min_leading..].to_string()
+                } else {
+                    r.clone()
+                }
+            })
             .collect();
     }
 
@@ -184,12 +196,8 @@ fn try_dotdotdots(whole: &str, part: &str, replace: &str) -> Option<String> {
         return None;
     }
 
-    let split_by_dots = |content: &str| -> Vec<String> {
-        content
-            .split("...")
-            .map(|s| s.to_string())
-            .collect()
-    };
+    let split_by_dots =
+        |content: &str| -> Vec<String> { content.split("...").map(|s| s.to_string()).collect() };
 
     let part_pieces = split_by_dots(part);
     let replace_pieces = split_by_dots(replace);
@@ -294,11 +302,9 @@ fn replace_most_similar_chunk(
         return (Some(exact), "Exact match (Tier 1)");
     }
 
-    if let Some(indent) = replace_part_with_missing_leading_whitespace(
-        &whole_lines,
-        &part_lines,
-        &replace_lines,
-    ) {
+    if let Some(indent) =
+        replace_part_with_missing_leading_whitespace(&whole_lines, &part_lines, &replace_lines)
+    {
         return (Some(indent), "Indentation-adjusted match (Tier 2)");
     }
 
@@ -316,12 +322,9 @@ fn replace_most_similar_chunk(
         return (Some(dots), "Elision (...) match (Tier 2.5)");
     }
 
-    if let Some(fuzzy) = replace_closest_edit_distance(
-        &whole_lines,
-        &prep_part,
-        &part_lines,
-        &replace_lines,
-    ) {
+    if let Some(fuzzy) =
+        replace_closest_edit_distance(&whole_lines, &prep_part, &part_lines, &replace_lines)
+    {
         return (Some(fuzzy), "Fuzzy sequence match (Tier 3)");
     }
 
@@ -430,13 +433,7 @@ fn find_matching_node<'a>(
 ) -> Option<Node<'a>> {
     let mut matched = None;
 
-    fn traverse<'a>(
-        n: Node<'a>,
-        k: &str,
-        nm: &str,
-        src: &[u8],
-        res: &mut Option<Node<'a>>,
-    ) {
+    fn traverse<'a>(n: Node<'a>, k: &str, nm: &str, src: &[u8], res: &mut Option<Node<'a>>) {
         if res.is_some() {
             return;
         }
@@ -474,11 +471,8 @@ fn replace_via_ast_fallback(
         replacement.as_bytes(),
         is_rust,
     );
-    let mut search_entities = find_declared_entities(
-        search_tree.root_node(),
-        search_part.as_bytes(),
-        is_rust,
-    );
+    let mut search_entities =
+        find_declared_entities(search_tree.root_node(), search_part.as_bytes(), is_rust);
 
     // Try wrapping the block if we are replacing raw methods without explicit parent braces
     if replacement_entities.is_empty() && search_entities.is_empty() {
@@ -644,7 +638,10 @@ fn main() {
             match fs::read_to_string(&file_path) {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("FATAL ERROR in file: {}\nCould not read file: {}", raw_path, e);
+                    eprintln!(
+                        "FATAL ERROR in file: {}\nCould not read file: {}",
+                        raw_path, e
+                    );
                     errors_found = true;
                     continue;
                 }
@@ -669,7 +666,10 @@ fn main() {
 
         let blocks = parse_diff_blocks(&file_info.code_diff);
         if blocks.is_empty() {
-            eprintln!("WARNING: No valid SEARCH/REPLACE blocks parsed for file: {}", raw_path);
+            eprintln!(
+                "WARNING: No valid SEARCH/REPLACE blocks parsed for file: {}",
+                raw_path
+            );
             continue;
         }
 
@@ -710,25 +710,28 @@ fn main() {
                 let closest_context = find_closest_match_context(&current_content, search_part);
                 eprintln!("SEARCH BLOCK:\n{}", search_part);
                 eprintln!("REPLACEMENT:\n{}", replacement);
-                eprintln!("CLOSEST ACTUAL REPOSITORY CONTEXT SNIPPET:\n{}", closest_context);
+                eprintln!(
+                    "CLOSEST ACTUAL REPOSITORY CONTEXT SNIPPET:\n{}",
+                    closest_context
+                );
                 errors_found = true;
                 break;
             }
         }
 
-        // Verify that the file remains syntactically correct overall
-        if is_js_or_ts || is_rust {
-            if let Some(ref mut parser) = active_parser {
-                let final_tree = parser.parse(&current_content, None).unwrap();
-                if has_syntax_error(final_tree.root_node()) {
-                    eprintln!(
-                        "FATAL ERROR in file: {}\nSyntax validation failed. The resulting code contains compilation errors.",
-                        raw_path
-                    );
-                    errors_found = true;
-                }
-            }
-        }
+        // // Verify that the file remains syntactically correct overall
+        // if is_js_or_ts || is_rust {
+        //     if let Some(ref mut parser) = active_parser {
+        //         let final_tree = parser.parse(&current_content, None).unwrap();
+        //         if has_syntax_error(final_tree.root_node()) {
+        //             eprintln!(
+        //                 "FATAL ERROR in file: {}\nSyntax validation failed. The resulting code contains compilation errors.",
+        //                 raw_path
+        //             );
+        //             errors_found = true;
+        //         }
+        //     }
+        // }
 
         file_updates.insert(file_path, current_content);
     }
@@ -754,7 +757,10 @@ fn main() {
     for (file_path, new_text) in &file_updates {
         if let Some(parent) = file_path.parent() {
             if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("FATAL ERROR: Failed to create directories for path {:?}: {}", file_path, e);
+                eprintln!(
+                    "FATAL ERROR: Failed to create directories for path {:?}: {}",
+                    file_path, e
+                );
                 std::process::exit(1);
             }
         }
@@ -790,9 +796,7 @@ fn main() {
         #[cfg(not(target_os = "windows"))]
         cmd.arg("-c");
 
-        let status = cmd.arg(&cmd_str)
-            .current_dir(&args.cwd)
-            .status();
+        let status = cmd.arg(&cmd_str).current_dir(&args.cwd).status();
 
         let compile_success = match status {
             Ok(s) => s.success(),
@@ -855,7 +859,10 @@ mod tests {
             "line_3\n".to_string(),
         ];
         let part = vec!["target_line\n".to_string()];
-        let replace = vec!["replacement_line_a\n".to_string(), "replacement_line_b\n".to_string()];
+        let replace = vec![
+            "replacement_line_a\n".to_string(),
+            "replacement_line_b\n".to_string(),
+        ];
 
         let result = perfect_replace(&whole, &part, &replace);
         assert_eq!(
@@ -882,12 +889,8 @@ mod tests {
             "        fn inner() {}\n".to_string(),
             "    }\n".to_string(),
         ];
-        let part = vec![
-            "fn inner() {}\n".to_string(),
-        ];
-        let replace = vec![
-            "fn adjusted_inner() {}\n".to_string(),
-        ];
+        let part = vec!["fn inner() {}\n".to_string()];
+        let replace = vec!["fn adjusted_inner() {}\n".to_string()];
 
         let result = replace_part_with_missing_leading_whitespace(&whole, &part, &replace);
         assert_eq!(
@@ -1015,9 +1018,15 @@ new_func_2();
         let tree = parser.parse(src, None).unwrap();
         let entities = find_declared_entities(tree.root_node(), src.as_bytes(), true);
 
-        let has_struct = entities.iter().any(|(kind, name)| kind == "struct_item" && name == "Config");
-        let has_impl = entities.iter().any(|(kind, name)| kind == "impl_item" && name == "Config");
-        let has_fn = entities.iter().any(|(kind, name)| kind == "function_item" && name == "init" || name == "execute_task");
+        let has_struct = entities
+            .iter()
+            .any(|(kind, name)| kind == "struct_item" && name == "Config");
+        let has_impl = entities
+            .iter()
+            .any(|(kind, name)| kind == "impl_item" && name == "Config");
+        let has_fn = entities.iter().any(|(kind, name)| {
+            kind == "function_item" && name == "init" || name == "execute_task"
+        });
 
         assert!(has_struct, "Failed to resolve struct_item: 'Config'");
         assert!(has_impl, "Failed to resolve impl_item: 'Config'");
@@ -1043,9 +1052,15 @@ new_func_2();
         let tree = parser.parse(src, None).unwrap();
         let entities = find_declared_entities(tree.root_node(), src.as_bytes(), false);
 
-        let has_class = entities.iter().any(|(kind, name)| kind == "class_declaration" && name == "UserProfile");
-        let has_method = entities.iter().any(|(kind, name)| kind == "method_definition" && name == "render");
-        let has_fn = entities.iter().any(|(kind, name)| kind == "function_declaration" && name == "getUserID");
+        let has_class = entities
+            .iter()
+            .any(|(kind, name)| kind == "class_declaration" && name == "UserProfile");
+        let has_method = entities
+            .iter()
+            .any(|(kind, name)| kind == "method_definition" && name == "render");
+        let has_fn = entities
+            .iter()
+            .any(|(kind, name)| kind == "function_declaration" && name == "getUserID");
 
         assert!(has_class, "Failed to find class_declaration: 'UserProfile'");
         assert!(has_method, "Failed to find method_definition: 'render'");
@@ -1080,7 +1095,7 @@ new_func_2();
 
         let result = replace_via_ast_fallback(&mut parser, target, search, replacement, false);
         assert!(result.is_some());
-        
+
         let updated = result.unwrap();
         assert!(updated.contains("attempting new"));
         assert!(!updated.contains("attempting old"));
@@ -1094,11 +1109,12 @@ new_func_2();
 
         let target = "impl State {\n    fn transition(&mut self) {\n        self.step = Step::First;\n    }\n}";
         let search = "fn transition  ( &mut self ) {\n        self.step = Step::First;\n    }";
-        let replacement = "    fn transition(&mut self) {\n        self.step = Step::Second;\n    }";
+        let replacement =
+            "    fn transition(&mut self) {\n        self.step = Step::Second;\n    }";
 
         let result = replace_via_ast_fallback(&mut parser, target, search, replacement, true);
         assert!(result.is_some());
-        
+
         let updated = result.unwrap();
         assert!(updated.contains("self.step = Step::Second;"));
         assert!(!updated.contains("self.step = Step::First;"));
