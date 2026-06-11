@@ -1,5 +1,7 @@
 
 
+git add .
+cd /etc/nixos # (or ~/nixos-config)
 nix flake update aider-patcher
 rebuild
 
