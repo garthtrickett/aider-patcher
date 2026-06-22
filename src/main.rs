@@ -110,60 +110,22 @@ fn replace_part_with_missing_leading_whitespace(
     part_lines: &[String],
     replace_lines: &[String],
 ) -> Option<String> {
-    if part_lines.is_empty() {
+    let part_len = part_lines.len();
+    if part_len == 0 {
+        let mut res = replace_lines.join("");
+        res.push_str(&whole_lines.join(""));
+        return Some(res);
+    }
+
+    if whole_lines.len() < part_len {
         return None;
     }
 
-    let mut leading = Vec::new();
-    for p in part_lines {
-        if !p.trim().is_empty() {
-            leading.push(p.len() - p.trim_start().len());
-        }
-    }
-    for r in replace_lines {
-        if !r.trim().is_empty() {
-            leading.push(r.len() - r.trim_start().len());
-        }
-    }
-
-    let min_leading = leading.into_iter().min().unwrap_or(0);
-    let mut adjusted_part_lines = part_lines.to_vec();
-    let mut adjusted_replace_lines = replace_lines.to_vec();
-
-    if min_leading > 0 {
-        adjusted_part_lines = part_lines
-            .iter()
-            .map(|p| {
-                if !p.trim().is_empty() {
-                    p[min_leading..].to_string()
-                } else {
-                    p.clone()
-                }
-            })
-            .collect();
-        adjusted_replace_lines = replace_lines
-            .iter()
-            .map(|r| {
-                if !r.trim().is_empty() {
-                    r[min_leading..].to_string()
-                } else {
-                    r.clone()
-                }
-            })
-            .collect();
-    }
-
-    let num_part_lines = adjusted_part_lines.len();
-    if whole_lines.len() < num_part_lines {
-        return None;
-    }
-
-    for i in 0..=(whole_lines.len() - num_part_lines) {
-        if let Some(add_leading) = match_but_for_leading_whitespace(
-            &whole_lines[i..i + num_part_lines],
-            &adjusted_part_lines,
-        ) {
-            let adjusted_replace: Vec<String> = adjusted_replace_lines
+    for i in 0..=(whole_lines.len() - part_len) {
+        if let Some(add_leading) =
+            match_but_for_leading_whitespace(&whole_lines[i..i + part_len], part_lines)
+        {
+            let adjusted_replace: Vec<String> = replace_lines
                 .iter()
                 .map(|rline| {
                     if !rline.trim().is_empty() {
@@ -179,7 +141,7 @@ fn replace_part_with_missing_leading_whitespace(
             let mut res = Vec::new();
             res.extend_from_slice(&whole_lines[0..i]);
             res.extend_from_slice(&adjusted_replace);
-            res.extend_from_slice(&whole_lines[i + num_part_lines..]);
+            res.extend_from_slice(&whole_lines[i + part_len..]);
             return Some(res.join(""));
         }
     }
@@ -323,7 +285,7 @@ fn replace_most_similar_chunk(
         return (Some(fuzzy), "Fuzzy sequence match (Tier 3)");
     }
 
-    (None, "Failed to match")
+    (None, "No match")
 }
 
 fn find_closest_match_context(whole: &str, part: &str) -> String {
@@ -390,6 +352,9 @@ fn find_declared_entities(node: Node, source: &[u8], is_rust: bool) -> Vec<(Stri
                 || t == "interface_declaration"
                 || t == "method_definition"
                 || t == "generator_function_declaration"
+                || t == "variable_declarator"
+                || t == "type_alias_declaration"
+                || t == "enum_declaration"
         };
 
         if is_target {
@@ -456,7 +421,7 @@ fn replace_via_ast_fallback(
     let mut search_entities =
         find_declared_entities(search_tree.root_node(), search_part.as_bytes(), is_rust);
 
-    // Try wrapping the block if we are replacing raw methods without explicit parent braces
+    // Try wrapping the block if we are replacing raw methods or variable declarators without explicit parent context
     if replacement_entities.is_empty() && search_entities.is_empty() {
         let wrapped_replacement = if is_rust {
             format!("impl _DummyImpl {{\n{}\n}}", replacement)
@@ -501,10 +466,20 @@ fn replace_via_ast_fallback(
     if let Some(node) = target_node {
         let mut node_to_replace = node;
         if !is_rust {
-            if let Some(parent) = node.parent() {
-                if parent.kind() == "export_statement" {
+            // Traverse up ancestors to find the containing statement or export block for clean replacements
+            let mut curr = node;
+            while let Some(parent) = curr.parent() {
+                let pk = parent.kind();
+                if pk == "lexical_declaration"
+                    || pk == "variable_declaration"
+                    || pk == "export_statement"
+                {
                     node_to_replace = parent;
                 }
+                if pk == "statement_block" || pk == "program" || pk == "class_body" {
+                    break;
+                }
+                curr = parent;
             }
         }
 
@@ -1002,5 +977,24 @@ new_func_2();
         let updated = result.unwrap();
         assert!(updated.contains("self.step = Step::Second;"));
         assert!(!updated.contains("self.step = Step::First;"));
+    }
+
+    #[test]
+    fn test_ts_ast_fallback_arrow_function() {
+        let mut parser = TsParser::new();
+        let tsx_language = tree_sitter_typescript::LANGUAGE_TSX;
+        parser.set_language(&tsx_language.into()).unwrap();
+
+        let target = "export const MyComponent = () => {\n    return <div>old content</div>;\n};";
+        let search = "export const MyComponent = () => {\n    return <div>old content</div>;\n};";
+        let replacement =
+            "export const MyComponent = () => {\n    return <div>new content</div>;\n};";
+
+        let result = replace_via_ast_fallback(&mut parser, target, search, replacement, false);
+        assert!(result.is_some());
+
+        let updated = result.unwrap();
+        assert!(updated.contains("new content"));
+        assert!(!updated.contains("old content"));
     }
 }
