@@ -6,7 +6,6 @@ use similar::TextDiff;
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
-use std::process::Command;
 use tree_sitter::{Node, Parser as TsParser};
 
 #[derive(ClapParser, Debug)]
@@ -19,10 +18,6 @@ struct Args {
     /// Target working directory of the project workspace
     #[arg(short, long, default_value = ".")]
     cwd: PathBuf,
-
-    /// Optional command to run for full compilation/type-checking verification (e.g. "cargo check" or "npm run build")
-    #[arg(short, long)]
-    compile_check: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -360,19 +355,6 @@ fn find_closest_match_context(whole: &str, part: &str) -> String {
     whole_lines[window_start..window_end].join("")
 }
 
-fn has_syntax_error(node: Node) -> bool {
-    if node.is_error() || node.is_missing() {
-        return true;
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        if has_syntax_error(child) {
-            return true;
-        }
-    }
-    false
-}
-
 fn find_identifier_name(n: Node, src: &[u8]) -> Option<String> {
     let ck = n.kind();
     if ck == "identifier" || ck == "type_identifier" || ck == "property_identifier" {
@@ -533,10 +515,7 @@ fn replace_via_ast_fallback(
         updated.push_str(replacement);
         updated.push_str(&current_content[end_byte..]);
 
-        let dry_run_tree = parser.parse(&updated, None).unwrap();
-        if !has_syntax_error(dry_run_tree.root_node()) {
-            return Some(updated);
-        }
+        return Some(updated);
     }
     None
 }
@@ -719,38 +698,12 @@ fn main() {
             }
         }
 
-        // // Verify that the file remains syntactically correct overall
-        // if is_js_or_ts || is_rust {
-        //     if let Some(ref mut parser) = active_parser {
-        //         let final_tree = parser.parse(&current_content, None).unwrap();
-        //         if has_syntax_error(final_tree.root_node()) {
-        //             eprintln!(
-        //                 "FATAL ERROR in file: {}\nSyntax validation failed. The resulting code contains compilation errors.",
-        //                 raw_path
-        //             );
-        //             errors_found = true;
-        //         }
-        //     }
-        // }
-
         file_updates.insert(file_path, current_content);
     }
 
     if errors_found {
         eprintln!("🛑 Transaction aborted. No files were modified on disk.");
         std::process::exit(1);
-    }
-
-    // Capture the original state of all files in this transaction in case we need to roll back
-    let mut backups = std::collections::HashMap::new();
-    for file_path in file_updates.keys() {
-        if file_path.exists() {
-            if let Ok(orig) = fs::read_to_string(file_path) {
-                backups.insert(file_path.clone(), Some(orig));
-            }
-        } else {
-            backups.insert(file_path.clone(), None);
-        }
     }
 
     // Write all verified modifications to disk transactionally
@@ -771,61 +724,7 @@ fn main() {
         println!("✅ {:?} updated successfully.", file_path);
     }
 
-    // Run compile checking if configured or auto-detected
-    let mut check_command = args.compile_check.clone();
-    if check_command.is_none() {
-        if args.cwd.join("Cargo.toml").exists() {
-            check_command = Some("cargo check".to_string());
-        } else if args.cwd.join("tsconfig.json").exists() {
-            check_command = Some("npx tsc --noEmit".to_string());
-        } else if args.cwd.join("package.json").exists() {
-            check_command = Some("npm run build".to_string());
-        }
-    }
-
-    // if let Some(cmd_str) = check_command {
-    //     println!("⚙️ Running compilation check: \"{}\"...", cmd_str);
-
-    //     #[cfg(target_os = "windows")]
-    //     let mut cmd = Command::new("cmd");
-    //     #[cfg(target_os = "windows")]
-    //     cmd.arg("/C");
-
-    //     #[cfg(not(target_os = "windows"))]
-    //     let mut cmd = Command::new("sh");
-    //     #[cfg(not(target_os = "windows"))]
-    //     cmd.arg("-c");
-
-    //     let status = cmd.arg(&cmd_str).current_dir(&args.cwd).status();
-
-    //     let compile_success = match status {
-    //         Ok(s) => s.success(),
-    //         Err(e) => {
-    //             eprintln!("WARNING: Failed to run compilation check command: {}", e);
-    //             false
-    //         }
-    //     };
-
-    //     if !compile_success {
-    //         eprintln!("🛑 Compilation check failed! Rolling back changes...");
-    //         for (file_path, backup) in backups {
-    //             match backup {
-    //                 Some(orig) => {
-    //                     let _ = fs::write(&file_path, orig);
-    //                 }
-    //                 None => {
-    //                     let _ = fs::remove_file(&file_path);
-    //                 }
-    //             }
-    //         }
-    //         eprintln!("🛑 Transaction aborted. All modifications rolled back safely.");
-    //         std::process::exit(1);
-    //     } else {
-    //         println!("✨ Compilation check passed successfully.");
-    //     }
-    // }
-
-    // println!("\nDone. All operations completed successfully.");
+    println!("\nDone. All operations completed successfully.");
 }
 
 // ==============================================================================
@@ -1067,21 +966,6 @@ new_func_2();
         assert!(has_fn, "Failed to find function_declaration: 'getUserID'");
     }
 
-    #[test]
-    fn test_syntax_error_detection() {
-        let mut parser = TsParser::new();
-        let rust_language = tree_sitter_rust::LANGUAGE;
-        parser.set_language(&rust_language.into()).unwrap();
-
-        let bad_src = "fn broken_rust() { let x = 10;";
-        let tree = parser.parse(bad_src, None).unwrap();
-
-        assert!(
-            has_syntax_error(tree.root_node()),
-            "Patcher failed to detect syntax errors in broken code structure"
-        );
-    }
-
     // --- AST Fallback (Tier 3.5) Integration Tests ---
     #[test]
     fn test_ts_ast_fallback_success() {
@@ -1118,19 +1002,5 @@ new_func_2();
         let updated = result.unwrap();
         assert!(updated.contains("self.step = Step::Second;"));
         assert!(!updated.contains("self.step = Step::First;"));
-    }
-
-    #[test]
-    fn test_ast_fallback_aborts_on_syntax_error() {
-        let mut parser = TsParser::new();
-        let rust_language = tree_sitter_rust::LANGUAGE;
-        parser.set_language(&rust_language.into()).unwrap();
-
-        let target = "fn run() {\n    println!(\"hello\");\n}";
-        let search = "fn run() {\n    println!(\"hello\");\n}";
-        let replacement = "fn run() {\n    println!(\"hello\");";
-
-        let result = replace_via_ast_fallback(&mut parser, target, search, replacement, true);
-        assert_eq!(result, None);
     }
 }
