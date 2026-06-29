@@ -552,14 +552,17 @@ fn parse_diff_blocks(diff_text: &str) -> Vec<(String, String)> {
     blocks
 }
 
-fn main() {
-    let args = Args::parse();
+#[derive(Debug)]
+struct ApplyOutcome {
+    summary: Option<String>,
+}
 
-    let patch_content = match fs::read_to_string(&args.patch) {
+fn apply_patch_file(patch_path: &PathBuf, cwd: &PathBuf) -> Result<ApplyOutcome, ()> {
+    let patch_content = match fs::read_to_string(patch_path) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("FATAL ERROR: Failed to read patch JSON file: {}", e);
-            std::process::exit(1);
+            return Err(());
         }
     };
 
@@ -567,7 +570,7 @@ fn main() {
         Ok(d) => d,
         Err(e) => {
             eprintln!("FATAL ERROR: Failed to parse patch JSON payload: {}", e);
-            std::process::exit(1);
+            return Err(());
         }
     };
 
@@ -575,14 +578,14 @@ fn main() {
         println!("🤖 Summary: {}", summary);
     }
 
-    let mut file_updates = std::collections::HashMap::new();
+    let mut file_updates = HashMap::new();
 
     // Configure the Tree-Sitter TSX language parser globally
     let mut tsx_parser = TsParser::new();
     let tsx_language = tree_sitter_typescript::LANGUAGE_TSX;
     if tsx_parser.set_language(&tsx_language.into()).is_err() {
         eprintln!("FATAL ERROR: Failed to initialize tree-sitter typescript grammar.");
-        std::process::exit(1);
+        return Err(());
     }
 
     // Configure the Tree-Sitter Rust language parser globally
@@ -590,7 +593,7 @@ fn main() {
     let rust_language = tree_sitter_rust::LANGUAGE;
     if rust_parser.set_language(&rust_language.into()).is_err() {
         eprintln!("FATAL ERROR: Failed to initialize tree-sitter rust grammar.");
-        std::process::exit(1);
+        return Err(());
     }
 
     let mut errors_found = false;
@@ -600,7 +603,7 @@ fn main() {
         let file_path = if raw_path.starts_with('/') {
             PathBuf::from(raw_path)
         } else {
-            args.cwd.join(raw_path)
+            cwd.join(raw_path)
         };
 
         let file_exists = file_path.exists();
@@ -694,7 +697,7 @@ fn main() {
 
     if errors_found {
         eprintln!("🛑 Transaction aborted. No files were modified on disk.");
-        std::process::exit(1);
+        return Err(());
     }
 
     // Write all verified modifications to disk transactionally
@@ -705,17 +708,314 @@ fn main() {
                     "FATAL ERROR: Failed to create directories for path {:?}: {}",
                     file_path, e
                 );
-                std::process::exit(1);
+                return Err(());
             }
         }
         if let Err(e) = fs::write(file_path, new_text) {
             eprintln!("FATAL ERROR: Failed to write file {:?}: {}", file_path, e);
-            std::process::exit(1);
+            return Err(());
         }
         println!("✅ {:?} updated successfully.", file_path);
     }
 
     println!("\nDone. All operations completed successfully.");
+
+    Ok(ApplyOutcome {
+        summary: patch_data.summary,
+    })
+}
+
+fn command_exists(binary: &str) -> bool {
+    matches!(
+        Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {} >/dev/null 2>&1", binary))
+            .status(),
+        Ok(status) if status.success()
+    )
+}
+
+fn escape_osascript_text(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn send_notification(title: &str, message: &str, critical: bool) {
+    if command_exists("notify-send") {
+        let mut cmd = Command::new("notify-send");
+        if critical {
+            cmd.args(["-u", "critical"]);
+        }
+        let _ = cmd.arg(title).arg(message).status();
+    } else if command_exists("osascript") {
+        let script = format!(
+            "display notification \"{}\" with title \"{}\"",
+            escape_osascript_text(message),
+            escape_osascript_text(title)
+        );
+        let _ = Command::new("osascript").arg("-e").arg(script).status();
+    }
+}
+
+fn run_git_commit(cwd: &PathBuf, summary: Option<&str>) -> bool {
+    println!("\n🔍 Reviewing changes:");
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(cwd.as_os_str())
+        .args(["diff", "--color=always"])
+        .status();
+    println!();
+
+    let add_status = Command::new("git")
+        .arg("-C")
+        .arg(cwd.as_os_str())
+        .args(["add", "."])
+        .status();
+
+    if !matches!(add_status, Ok(status) if status.success()) {
+        eprintln!("FATAL ERROR: git add failed.");
+        return false;
+    }
+
+    let staged_status = Command::new("git")
+        .arg("-C")
+        .arg(cwd.as_os_str())
+        .args(["diff", "--cached", "--quiet"])
+        .status();
+
+    if matches!(staged_status, Ok(status) if status.success()) {
+        println!("ℹ️  No staged changes to commit.");
+        return true;
+    }
+
+    let commit_message = summary
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("AI Code Update");
+
+    let commit_status = Command::new("git")
+        .arg("-C")
+        .arg(cwd.as_os_str())
+        .args(["commit", "-m", commit_message])
+        .status();
+
+    if !matches!(commit_status, Ok(status) if status.success()) {
+        eprintln!("FATAL ERROR: git commit failed.");
+        return false;
+    }
+
+    println!("📜 Files Changed:");
+    if let Ok(output) = Command::new("git")
+        .arg("-C")
+        .arg(cwd.as_os_str())
+        .args(["show", "--name-only", "--format=", "HEAD"])
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines().filter(|line| !line.trim().is_empty()) {
+            println!("  📄 {}", line);
+        }
+    }
+
+    true
+}
+
+fn is_patch_payload(path: &PathBuf) -> bool {
+    let Some(file_name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+
+    if file_name == "current_response.json" {
+        return false;
+    }
+
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref(),
+        Some("json") | Some("txt")
+    )
+}
+
+fn snapshot_watch_dir(watch_dir: &PathBuf) -> HashMap<PathBuf, SystemTime> {
+    let mut seen = HashMap::new();
+
+    let Ok(entries) = fs::read_dir(watch_dir) else {
+        return seen;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_patch_payload(&path) {
+            continue;
+        }
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let modified = metadata.modified().unwrap_or_else(|_| SystemTime::now());
+        seen.insert(path, modified);
+    }
+
+    seen
+}
+
+fn discover_new_payload(
+    watch_dir: &PathBuf,
+    seen: &mut HashMap<PathBuf, SystemTime>,
+) -> Option<PathBuf> {
+    let entries = fs::read_dir(watch_dir).ok()?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_patch_payload(&path) {
+            continue;
+        }
+
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let modified = metadata.modified().unwrap_or_else(|_| SystemTime::now());
+        let should_process = match seen.get(&path) {
+            Some(previous_modified) => *previous_modified != modified,
+            None => true,
+        };
+
+        seen.insert(path.clone(), modified);
+
+        if should_process {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
+fn resolve_watch_dir(args: &Args) -> Result<PathBuf, String> {
+    if let Some(watch_dir) = &args.watch_dir {
+        return Ok(watch_dir.clone());
+    }
+
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "Could not resolve $HOME for default watch directory.".to_string())?;
+
+    Ok(home.join("Downloads"))
+}
+
+fn run_watch_mode(args: &Args) {
+    let cwd = match args.cwd.canonicalize() {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("FATAL ERROR: Could not resolve cwd {:?}: {}", args.cwd, e);
+            std::process::exit(1);
+        }
+    };
+
+    let watch_dir = match resolve_watch_dir(args).and_then(|path| {
+        path.canonicalize()
+            .map_err(|e| format!("Could not resolve watch dir {:?}: {}", path, e))
+    }) {
+        Ok(path) => path,
+        Err(e) => {
+            eprintln!("FATAL ERROR: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    println!("👀 Watching {:?} for incoming patch payloads...", watch_dir);
+
+    let mut seen = snapshot_watch_dir(&watch_dir);
+
+    loop {
+        if let Some(incoming_path) = discover_new_payload(&watch_dir, &mut seen) {
+            thread::sleep(Duration::from_millis(200));
+
+            if !incoming_path.is_file() {
+                continue;
+            }
+
+            let file_name = incoming_path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("<unknown>");
+
+            println!("----------------------------------------");
+            println!("📂 Detected: {}", file_name);
+
+            let working_patch = cwd.join("current_response.json");
+            if let Err(e) = fs::copy(&incoming_path, &working_patch) {
+                eprintln!("FATAL ERROR: Failed to copy patch payload: {}", e);
+                send_notification("Patcher Failed", "Could not copy patch payload.", true);
+                println!("----------------------------------------");
+                continue;
+            }
+
+            println!("⚙️  Processing changes with Rust AiderPatcher...");
+
+            match apply_patch_file(&working_patch, &cwd) {
+                Ok(outcome) => {
+                    let committed = if args.no_commit {
+                        true
+                    } else {
+                        run_git_commit(&cwd, outcome.summary.as_deref())
+                    };
+
+                    if committed {
+                        send_notification(
+                            "Patcher Success",
+                            "All changes applied and committed.",
+                            false,
+                        );
+                    } else {
+                        send_notification("Patcher Failed", "Changes applied, but git commit failed.", true);
+                    }
+                }
+                Err(()) => {
+                    eprintln!("⛔ TRANSACTION FAILED: One or more blocks did not match.");
+                    send_notification(
+                        "Patcher Failed",
+                        "Search blocks mismatch. No changes applied.",
+                        true,
+                    );
+                }
+            }
+
+            let _ = fs::remove_file(&working_patch);
+            let _ = fs::remove_file(&incoming_path);
+            println!("----------------------------------------");
+        }
+
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn main() {
+    let args = Args::parse();
+
+    if args.watch {
+        run_watch_mode(&args);
+        return;
+    }
+
+    let Some(patch_path) = &args.patch else {
+        eprintln!("FATAL ERROR: --patch is required unless --watch is enabled.");
+        std::process::exit(2);
+    };
+
+    if apply_patch_file(patch_path, &args.cwd).is_err() {
+        std::process::exit(1);
+    }
 }
 
 // ==============================================================================
