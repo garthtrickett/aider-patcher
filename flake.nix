@@ -14,7 +14,7 @@
         # 1. Derivation for the Rust patcher binary
         aider-patcher = pkgs.rustPlatform.buildRustPackage {
           pname = "aider-patcher";
-          version = "0.1.0";
+          version = "0.1.2";
           src = ./.;
 
           cargoLock = {

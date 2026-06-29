@@ -3,21 +3,37 @@
 use clap::Parser as ClapParser;
 use serde::Deserialize;
 use similar::TextDiff;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
+use std::process::Command;
+use std::thread;
+use std::time::{Duration, SystemTime};
 use tree_sitter::{Node, Parser as TsParser};
 
 #[derive(ClapParser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to the JSON patch file containing the Aider code diff payload
-    #[arg(short, long)]
-    patch: PathBuf,
+    #[arg(short, long, required_unless_present = "watch")]
+    patch: Option<PathBuf>,
 
     /// Target working directory of the project workspace
     #[arg(short, long, default_value = ".")]
     cwd: PathBuf,
+
+    /// Watch a directory for incoming .json/.txt patch payloads and apply them as they arrive
+    #[arg(long)]
+    watch: bool,
+
+    /// Directory to watch in --watch mode. Defaults to $HOME/Downloads.
+    #[arg(long, value_name = "DIR")]
+    watch_dir: Option<PathBuf>,
+
+    /// In --watch mode, apply patches without running git add/commit afterward
+    #[arg(long)]
+    no_commit: bool,
 }
 
 #[derive(Deserialize, Debug)]
