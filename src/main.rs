@@ -31,7 +31,7 @@ struct Args {
     #[arg(long, value_name = "DIR")]
     watch_dir: Option<PathBuf>,
 
-    /// In --watch mode, only apply payloads whose root "project" field matches this key
+    /// Override the inferred project key used to route watched patch payloads
     #[arg(long, value_name = "KEY")]
     project_key: Option<String>,
 
@@ -956,6 +956,14 @@ fn resolve_watch_dir(args: &Args) -> Result<PathBuf, String> {
     Ok(home.join("Downloads"))
 }
 
+fn infer_project_key_from_cwd(cwd: &PathBuf) -> Option<String> {
+    cwd.file_name()
+        .and_then(|value| value.to_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn run_watch_mode(args: &Args) {
     let cwd = match args.cwd.canonicalize() {
         Ok(path) => path,
@@ -976,9 +984,16 @@ fn run_watch_mode(args: &Args) {
         }
     };
 
+    let effective_project_key = args
+        .project_key
+        .clone()
+        .or_else(|| infer_project_key_from_cwd(&cwd));
+
     println!("👀 Watching {:?} for incoming patch payloads...", watch_dir);
-    if let Some(project_key) = &args.project_key {
+    if let Some(project_key) = &effective_project_key {
         println!("📦 Applying only payloads with project: {}", project_key);
+    } else {
+        println!("📦 No project key inferred; applying any valid patch payload.");
     }
 
     let mut seen = snapshot_watch_dir(&watch_dir);
@@ -996,7 +1011,7 @@ fn run_watch_mode(args: &Args) {
                 .and_then(|value| value.to_str())
                 .unwrap_or("<unknown>");
 
-            if !payload_matches_project(&incoming_path, args.project_key.as_deref()) {
+            if !payload_matches_project(&incoming_path, effective_project_key.as_deref()) {
                 continue;
             }
 

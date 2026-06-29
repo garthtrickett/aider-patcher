@@ -1,10 +1,14 @@
 
 
-# Run the native patch watcher from a project root:
+# Run the native patch watcher from a project root.
+# The project key is inferred from the folder name, so ~/code/my-project maps to "my-project":
+aider-patcher --watch --cwd .
+
+# Override the inferred key only when needed:
 aider-patcher --watch --cwd . --project-key my-project
 
 # Or use ./bridge.sh as a compatibility wrapper:
-PROJECT_KEY=my-project ./bridge.sh
+./bridge.sh
 #
 # After updating the flake input from a NixOS config:
 # git add .
@@ -22,7 +26,7 @@ When providing file updates, you must output a single JSON payload. The pipeline
 ### 1. Root Structure Rules
 * The root of your response MUST be a single, valid JSON object. Do NOT wrap it in a root array.
 * If you are editing multiple files, include all of them in the single `"files"` array.
-* Add a root-level `"project"` string when targeting a watcher launched with `--project-key`. The value must exactly match the watcher key, for example `"project": "my-project"`.
+* Add a root-level `"project"` string to route downloads to the correct watcher. By default, each watcher uses the folder name of its `--cwd` as the project key. For example, a watcher running in `~/code/my-project` expects `"project": "my-project"`.
 
 ---
 

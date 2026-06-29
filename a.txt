@@ -15,7 +15,7 @@
         # 1. Derivation for the Rust patcher binary
         aider-patcher = pkgs.rustPlatform.buildRustPackage {
           pname = "aider-patcher";
-          version = "0.1.2";
+          version = "0.1.3";
           src = ./.;
 
           cargoLock = {
@@ -54,7 +54,7 @@
 # ==============================================================================
 [package]
 name = "aider-patcher"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Grug Brain <grug@daemon.local>"]
 description = "High-fidelity, multi-tier search-and-replace Aider patch engine in Rust."
@@ -74,9 +74,10 @@ tree-sitter-rust = "0.23.2" # or current 2026 version
 
 
 # Run the native patch watcher from a project root:
-aider-patcher --watch --cwd .
+aider-patcher --watch --cwd . --project-key my-project
 
-# Or use ./bridge.sh as a compatibility wrapper.
+# Or use ./bridge.sh as a compatibility wrapper:
+PROJECT_KEY=my-project ./bridge.sh
 #
 # After updating the flake input from a NixOS config:
 # git add .
@@ -94,6 +95,7 @@ When providing file updates, you must output a single JSON payload. The pipeline
 ### 1. Root Structure Rules
 * The root of your response MUST be a single, valid JSON object. Do NOT wrap it in a root array.
 * If you are editing multiple files, include all of them in the single `"files"` array.
+* Add a root-level `"project"` string when targeting a watcher launched with `--project-key`. The value must exactly match the watcher key, for example `"project": "my-project"`.
 
 ---
 
@@ -108,6 +110,7 @@ Within the `"code_diff"` string of each file entry, use Aider-style `<<<<<<< SEA
 
 ```json
 {
+  "project": "my-project",
   "summary": "feat: implement rate limiting middleware",
   "files": [
     {
@@ -175,6 +178,12 @@ set -euo pipefail
 
 WATCH_DIR="${WATCH_DIR:-$HOME/Downloads}"
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+PROJECT_KEY="${PROJECT_KEY:-}"
+PROJECT_ARGS=()
+
+if [ -n "$PROJECT_KEY" ]; then
+    PROJECT_ARGS=(--project-key "$PROJECT_KEY")
+fi
 
 cd "$PROJECT_DIR"
 
@@ -192,7 +201,7 @@ else
     exit 1
 fi
 
-exec "$PATCHER_BIN" --watch --watch-dir "$WATCH_DIR" --cwd "$PROJECT_DIR" "$@"
+exec "$PATCHER_BIN" --watch --watch-dir "$WATCH_DIR" --cwd "$PROJECT_DIR" "${PROJECT_ARGS[@]}" "$@"
 
 --- END OF FILE bridge.sh ---
 
@@ -213,7 +222,7 @@ exec "$PATCHER_BIN" --watch --watch-dir "$WATCH_DIR" --cwd "$PROJECT_DIR" "$@"
         # 1. Derivation for the Rust patcher binary
         aider-patcher = pkgs.rustPlatform.buildRustPackage {
           pname = "aider-patcher";
-          version = "0.1.2";
+          version = "0.1.3";
           src = ./.;
 
           cargoLock = {
@@ -281,6 +290,10 @@ struct Args {
     #[arg(long, value_name = "DIR")]
     watch_dir: Option<PathBuf>,
 
+    /// In --watch mode, only apply payloads whose root "project" field matches this key
+    #[arg(long, value_name = "KEY")]
+    project_key: Option<String>,
+
     /// In --watch mode, apply patches without running git add/commit afterward
     #[arg(long)]
     no_commit: bool,
@@ -294,6 +307,7 @@ struct PatchFileEntry {
 
 #[derive(Deserialize, Debug)]
 struct PatchJsonStructure {
+    project: Option<String>,
     summary: Option<String>,
     files: Vec<PatchFileEntry>,
 }
@@ -802,6 +816,44 @@ fn parse_diff_blocks(diff_text: &str) -> Vec<(String, String)> {
     blocks
 }
 
+fn read_patch_project(patch_path: &PathBuf) -> Result<Option<String>, String> {
+    let patch_content = fs::read_to_string(patch_path)
+        .map_err(|e| format!("Failed to read patch JSON file: {}", e))?;
+
+    let patch_data: PatchJsonStructure = serde_json::from_str(&patch_content)
+        .map_err(|e| format!("Failed to parse patch JSON payload: {}", e))?;
+
+    Ok(patch_data.project)
+}
+
+fn payload_matches_project(patch_path: &PathBuf, expected_project: Option<&str>) -> bool {
+    let Some(expected_project) = expected_project else {
+        return true;
+    };
+
+    match read_patch_project(patch_path) {
+        Ok(Some(project)) if project == expected_project => true,
+        Ok(Some(project)) => {
+            println!(
+                "↪️  Skipping payload for project '{}'; this watcher handles '{}'.",
+                project, expected_project
+            );
+            false
+        }
+        Ok(None) => {
+            println!(
+                "↪️  Skipping unkeyed payload; this watcher handles '{}'.",
+                expected_project
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("↪️  Skipping unroutable payload {:?}: {}", patch_path, e);
+            false
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ApplyOutcome {
     summary: Option<String>,
@@ -1184,6 +1236,9 @@ fn run_watch_mode(args: &Args) {
     };
 
     println!("👀 Watching {:?} for incoming patch payloads...", watch_dir);
+    if let Some(project_key) = &args.project_key {
+        println!("📦 Applying only payloads with project: {}", project_key);
+    }
 
     let mut seen = snapshot_watch_dir(&watch_dir);
 
@@ -1199,6 +1254,10 @@ fn run_watch_mode(args: &Args) {
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("<unknown>");
+
+            if !payload_matches_project(&incoming_path, args.project_key.as_deref()) {
+                continue;
+            }
 
             println!("----------------------------------------");
             println!("📂 Detected: {}", file_name);
