@@ -978,7 +978,11 @@ fn run_watch_mode(args: &Args) {
                             false,
                         );
                     } else {
-                        send_notification("Patcher Failed", "Changes applied, but git commit failed.", true);
+                        send_notification(
+                            "Patcher Failed",
+                            "Changes applied, but git commit failed.",
+                            true,
+                        );
                     }
                 }
                 Err(()) => {

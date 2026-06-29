@@ -40,7 +40,7 @@
             rustfmt
             clippy
             git
-          ] ++ (if stdenv.isDarwin then [ fswatch ] else [ inotify-tools ]);
+          ];
         };
       }
     );

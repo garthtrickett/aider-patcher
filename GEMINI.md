@@ -1,9 +1,15 @@
 
 
-git add .
-cd /etc/nixos # (or ~/nixos-config)
-nix flake update aider-patcher
-rebuild
+# Run the native patch watcher from a project root:
+aider-patcher --watch --cwd .
+
+# Or use ./bridge.sh as a compatibility wrapper.
+#
+# After updating the flake input from a NixOS config:
+# git add .
+# cd /etc/nixos # (or ~/nixos-config)
+# nix flake update aider-patcher
+# rebuild
 
 # GEMINI.md: Code Patching & Diff Guidelines
 
