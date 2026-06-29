@@ -7,6 +7,12 @@ set -euo pipefail
 
 WATCH_DIR="${WATCH_DIR:-$HOME/Downloads}"
 PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+PROJECT_KEY="${PROJECT_KEY:-}"
+PROJECT_ARGS=()
+
+if [ -n "$PROJECT_KEY" ]; then
+    PROJECT_ARGS=(--project-key "$PROJECT_KEY")
+fi
 
 cd "$PROJECT_DIR"
 
@@ -24,4 +30,4 @@ else
     exit 1
 fi
 
-exec "$PATCHER_BIN" --watch --watch-dir "$WATCH_DIR" --cwd "$PROJECT_DIR" "$@"
+exec "$PATCHER_BIN" --watch --watch-dir "$WATCH_DIR" --cwd "$PROJECT_DIR" "${PROJECT_ARGS[@]}" "$@"

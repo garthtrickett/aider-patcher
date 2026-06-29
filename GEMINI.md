@@ -1,9 +1,10 @@
 
 
 # Run the native patch watcher from a project root:
-aider-patcher --watch --cwd .
+aider-patcher --watch --cwd . --project-key my-project
 
-# Or use ./bridge.sh as a compatibility wrapper.
+# Or use ./bridge.sh as a compatibility wrapper:
+PROJECT_KEY=my-project ./bridge.sh
 #
 # After updating the flake input from a NixOS config:
 # git add .
@@ -21,6 +22,7 @@ When providing file updates, you must output a single JSON payload. The pipeline
 ### 1. Root Structure Rules
 * The root of your response MUST be a single, valid JSON object. Do NOT wrap it in a root array.
 * If you are editing multiple files, include all of them in the single `"files"` array.
+* Add a root-level `"project"` string when targeting a watcher launched with `--project-key`. The value must exactly match the watcher key, for example `"project": "my-project"`.
 
 ---
 
@@ -35,6 +37,7 @@ Within the `"code_diff"` string of each file entry, use Aider-style `<<<<<<< SEA
 
 ```json
 {
+  "project": "my-project",
   "summary": "feat: implement rate limiting middleware",
   "files": [
     {

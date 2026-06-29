@@ -2,7 +2,7 @@
 # ==============================================================================
 [package]
 name = "aider-patcher"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["Grug Brain <grug@daemon.local>"]
 description = "High-fidelity, multi-tier search-and-replace Aider patch engine in Rust."

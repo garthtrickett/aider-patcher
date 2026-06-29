@@ -31,6 +31,10 @@ struct Args {
     #[arg(long, value_name = "DIR")]
     watch_dir: Option<PathBuf>,
 
+    /// In --watch mode, only apply payloads whose root "project" field matches this key
+    #[arg(long, value_name = "KEY")]
+    project_key: Option<String>,
+
     /// In --watch mode, apply patches without running git add/commit afterward
     #[arg(long)]
     no_commit: bool,
@@ -44,6 +48,7 @@ struct PatchFileEntry {
 
 #[derive(Deserialize, Debug)]
 struct PatchJsonStructure {
+    project: Option<String>,
     summary: Option<String>,
     files: Vec<PatchFileEntry>,
 }
@@ -552,6 +557,44 @@ fn parse_diff_blocks(diff_text: &str) -> Vec<(String, String)> {
     blocks
 }
 
+fn read_patch_project(patch_path: &PathBuf) -> Result<Option<String>, String> {
+    let patch_content = fs::read_to_string(patch_path)
+        .map_err(|e| format!("Failed to read patch JSON file: {}", e))?;
+
+    let patch_data: PatchJsonStructure = serde_json::from_str(&patch_content)
+        .map_err(|e| format!("Failed to parse patch JSON payload: {}", e))?;
+
+    Ok(patch_data.project)
+}
+
+fn payload_matches_project(patch_path: &PathBuf, expected_project: Option<&str>) -> bool {
+    let Some(expected_project) = expected_project else {
+        return true;
+    };
+
+    match read_patch_project(patch_path) {
+        Ok(Some(project)) if project == expected_project => true,
+        Ok(Some(project)) => {
+            println!(
+                "↪️  Skipping payload for project '{}'; this watcher handles '{}'.",
+                project, expected_project
+            );
+            false
+        }
+        Ok(None) => {
+            println!(
+                "↪️  Skipping unkeyed payload; this watcher handles '{}'.",
+                expected_project
+            );
+            false
+        }
+        Err(e) => {
+            eprintln!("↪️  Skipping unroutable payload {:?}: {}", patch_path, e);
+            false
+        }
+    }
+}
+
 #[derive(Debug)]
 struct ApplyOutcome {
     summary: Option<String>,
@@ -934,6 +977,9 @@ fn run_watch_mode(args: &Args) {
     };
 
     println!("👀 Watching {:?} for incoming patch payloads...", watch_dir);
+    if let Some(project_key) = &args.project_key {
+        println!("📦 Applying only payloads with project: {}", project_key);
+    }
 
     let mut seen = snapshot_watch_dir(&watch_dir);
 
@@ -949,6 +995,10 @@ fn run_watch_mode(args: &Args) {
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("<unknown>");
+
+            if !payload_matches_project(&incoming_path, args.project_key.as_deref()) {
+                continue;
+            }
 
             println!("----------------------------------------");
             println!("📂 Detected: {}", file_name);
